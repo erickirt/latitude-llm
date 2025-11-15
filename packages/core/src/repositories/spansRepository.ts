@@ -356,24 +356,27 @@ export class SpansRepository extends Repository<Span> {
   }) {
     const conditions = [
       this.scopeFilter,
-      eq(commits.projectId, projectId),
       type ? eq(spans.type, type) : undefined,
       source ? inArray(spans.source, source) : undefined,
-    ].filter(Boolean) as SQL<unknown>[]
-
-    // Filter by cursor if provided (same pattern as document logs)
-    const cursorConditions = [
-      ...conditions,
       from
         ? sql`(${spans.startedAt}, ${spans.id}) < (${from.startedAt}, ${from.id})`
         : undefined,
     ].filter(Boolean) as SQL<unknown>[]
 
+    const commitUuids = await this.db
+      .select({ uuid: commits.uuid })
+      .from(commits)
+      .where(eq(commits.projectId, projectId))
+      .then((r) => r.map((c) => c.uuid))
+
+    if (commitUuids.length === 0) {
+      return Result.ok({ items: [], next: null })
+    }
+
     const result = await this.db
       .select(tt)
       .from(spans)
-      .innerJoin(commits, eq(spans.commitUuid, commits.uuid))
-      .where(and(...cursorConditions))
+      .where(and(...conditions, inArray(spans.commitUuid, commitUuids)))
       .orderBy(desc(spans.startedAt), desc(spans.id))
       .limit(limit + 1)
 
